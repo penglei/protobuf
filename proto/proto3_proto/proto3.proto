@@ -32,6 +32,7 @@
 syntax = "proto3";
 
 import "google/protobuf/any.proto";
+import "google/protobuf/wrappers.proto";
 import "test_proto/test.proto";
 
 package proto3_proto;
@@ -94,4 +95,12 @@ message TestUTF8 {
   oneof oneof { string field = 3; }
   map<string, int64> map_key = 4;
   map<int64, string> map_value = 5;
+}
+
+message Wrapped {
+  google.protobuf.BoolValue foo = 1;
+}
+
+message Scalar {
+  bool foo = 1;
 }

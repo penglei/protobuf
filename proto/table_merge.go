@@ -39,6 +39,22 @@ import (
 	"sync/atomic"
 )
 
+const wrapperPackage = "github.com/golang/protobuf/ptypes/wrappers"
+
+var valueWrapperMessages = map[string]struct{}{
+	"DoubleValue": {},
+	"FloatValue":  {},
+	"Int64Value":  {},
+	"UInt64Value": {},
+	"Int32Value":  {},
+	"UInt32Value": {},
+	"BoolValue":   {},
+	"StringValue": {},
+	"BytesValue":  {},
+}
+
+type mergeFunc = func(dst, src pointer)
+
 // Merge merges the src message into dst.
 // This assumes that dst and src of the same type and are non-nil.
 func (a *InternalMessageInfo) Merge(dst, src Message) {
@@ -82,6 +98,10 @@ type mergeFieldInfo struct {
 
 	// Where dst and src are pointers to the types being merged.
 	merge func(dst, src pointer)
+
+	// Allow value of wrapped types which provided by google/protobuf/wrappers can
+	// be overridden by the default value(zero).
+	allowDefault bool
 }
 
 var (
@@ -125,11 +145,11 @@ func (mi *mergeInfo) merge(dst, src pointer) {
 			}
 			if fi.basicWidth > 0 {
 				switch {
-				case fi.basicWidth == 1 && !*sfp.toBool():
+				case !fi.allowDefault && fi.basicWidth == 1 && !*sfp.toBool():
 					continue
-				case fi.basicWidth == 4 && *sfp.toUint32() == 0:
+				case !fi.allowDefault && fi.basicWidth == 4 && *sfp.toUint32() == 0:
 					continue
-				case fi.basicWidth == 8 && *sfp.toUint64() == 0:
+				case !fi.allowDefault && fi.basicWidth == 8 && *sfp.toUint64() == 0:
 					continue
 				}
 			}
@@ -169,6 +189,9 @@ func (mi *mergeInfo) computeMergeInfo() {
 	t := mi.typ
 	n := t.NumField()
 
+	_, isValueWrapper := valueWrapperMessages[t.Name()]
+	allowDefault := strings.HasPrefix(t.PkgPath(), wrapperPackage) && isValueWrapper
+
 	props := GetProperties(t)
 	for i := 0; i < n; i++ {
 		f := t.Field(i)
@@ -176,7 +199,7 @@ func (mi *mergeInfo) computeMergeInfo() {
 			continue
 		}
 
-		mfi := mergeFieldInfo{field: toField(&f)}
+		mfi := mergeFieldInfo{field: toField(&f), allowDefault: allowDefault}
 		tf := f.Type
 
 		// As an optimization, we can avoid the merge function call cost
@@ -263,11 +286,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., int32
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toInt32(); v != 0 {
-						*dst.toInt32() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toInt32(); v != 0 || allowDefault {
+							*dst.toInt32() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Int64:
 			switch {
@@ -295,11 +320,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., int64
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toInt64(); v != 0 {
-						*dst.toInt64() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toInt64(); v != 0 || allowDefault {
+							*dst.toInt64() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Uint32:
 			switch {
@@ -327,11 +354,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., uint32
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toUint32(); v != 0 {
-						*dst.toUint32() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toUint32(); v != 0 || allowDefault {
+							*dst.toUint32() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Uint64:
 			switch {
@@ -359,11 +388,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., uint64
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toUint64(); v != 0 {
-						*dst.toUint64() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toUint64(); v != 0 || allowDefault {
+							*dst.toUint64() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Float32:
 			switch {
@@ -391,11 +422,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., float32
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toFloat32(); v != 0 {
-						*dst.toFloat32() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toFloat32(); v != 0 || allowDefault {
+							*dst.toFloat32() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Float64:
 			switch {
@@ -423,11 +456,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., float64
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toFloat64(); v != 0 {
-						*dst.toFloat64() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toFloat64(); v != 0 || allowDefault {
+							*dst.toFloat64() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Bool:
 			switch {
@@ -455,11 +490,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., bool
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toBool(); v {
-						*dst.toBool() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toBool(); v || allowDefault {
+							*dst.toBool() = *src.toBool()
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.String:
 			switch {
@@ -487,11 +524,13 @@ func (mi *mergeInfo) computeMergeInfo() {
 					}
 				}
 			default: // E.g., string
-				mfi.merge = func(dst, src pointer) {
-					if v := *src.toString(); v != "" {
-						*dst.toString() = v
+				mfi.merge = func(allowDefault bool) mergeFunc {
+					return func(dst, src pointer) {
+						if v := *src.toString(); v != "" || allowDefault {
+							*dst.toString() = v
+						}
 					}
-				}
+				}(allowDefault)
 			}
 		case reflect.Slice:
 			isProto3 := props.Prop[i].proto3
